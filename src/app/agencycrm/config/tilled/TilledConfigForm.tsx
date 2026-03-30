@@ -45,7 +45,7 @@ export function TilledConfigForm({ initialLocationId }: { initialLocationId: str
 
     async function loadConfig() {
       const response = await fetch(
-        `/api/ghl/config/tilled?locationId=${encodeURIComponent(initialLocationId)}`,
+        `/api/agencycrm/config/tilled?locationId=${encodeURIComponent(initialLocationId)}`,
       );
       const payload = (await response.json()) as ConfigResponse & { error?: string };
 
@@ -78,7 +78,7 @@ export function TilledConfigForm({ initialLocationId }: { initialLocationId: str
     setIsSubmitting(true);
     setStatus("");
 
-    const response = await fetch("/api/ghl/config/tilled", {
+    const response = await fetch("/api/agencycrm/config/tilled", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -106,7 +106,7 @@ export function TilledConfigForm({ initialLocationId }: { initialLocationId: str
         }}
       >
         <h1 style={{ marginTop: 0 }}>Tilled Gateway Configuration</h1>
-        <p>Save Tilled credentials for this GHL location and verify the active mode before enabling it.</p>
+        <p>Save Tilled credentials for this Agency CRM location and verify the active mode before enabling it.</p>
 
         <form onSubmit={handleSubmit}>
           <label style={fieldStyle}>

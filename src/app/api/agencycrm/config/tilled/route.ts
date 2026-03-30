@@ -1,9 +1,21 @@
 import { fail, ok, parseRequestBody } from "@/lib/api";
 import { encryptSecret } from "@/lib/crypto";
-import { connectProviderConfig, createProviderApiKey, getFreshLocationAccessToken } from "@/lib/ghl";
+import { connectProviderConfig, createProviderApiKey, getFreshLocationAccessToken } from "@/lib/agencycrm";
 import { getTilledConfig, upsertTilledConfig } from "@/lib/repositories/locations";
 import { verifyTilledConnection } from "@/lib/tilled";
 import { tilledConfigSchema } from "@/lib/validators";
+
+function redactSecret(value?: string) {
+  if (!value) {
+    return { present: false };
+  }
+
+  return {
+    present: true,
+    length: value.length,
+    preview: `${value.slice(0, 4)}...${value.slice(-4)}`,
+  };
+}
 
 export async function GET(request: Request) {
   try {
@@ -45,7 +57,22 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const payload = await parseRequestBody(request, tilledConfigSchema);
+    console.info("[agencycrm.config.tilled] request received", {
+      locationId: payload.locationId,
+      mode: payload.mode,
+      verify: payload.verify,
+      merchantAccountId: payload.tilled_merchant_account_id,
+      testSecret: redactSecret(payload.tilled_test_secret_key),
+      liveSecret: redactSecret(payload.tilled_live_secret_key),
+      publishableKey: redactSecret(payload.tilled_publishable_key),
+      webhookSecret: redactSecret(payload.tilled_webhook_secret),
+    });
+
     const existing = await getTilledConfig(payload.locationId);
+    console.info("[agencycrm.config.tilled] existing config lookup complete", {
+      locationId: payload.locationId,
+      hasExistingConfig: Boolean(existing),
+    });
 
     const saved = await upsertTilledConfig({
       location_id: payload.locationId,
@@ -60,18 +87,35 @@ export async function POST(request: Request) {
       publishable_key: payload.tilled_publishable_key || existing?.publishable_key || null,
       verify_status: "pending",
     });
+    console.info("[agencycrm.config.tilled] config saved to supabase", {
+      locationId: saved.location_id,
+      providerApiKey: saved.provider_api_key,
+      mode: saved.mode,
+    });
 
     let verifyStatus = "skipped";
     if (payload.verify) {
+      console.info("[agencycrm.config.tilled] starting Tilled verification", {
+        locationId: payload.locationId,
+        merchantAccountId: payload.tilled_merchant_account_id,
+      });
       await verifyTilledConnection(payload.locationId);
       verifyStatus = "verified";
       await upsertTilledConfig({
         ...saved,
         verify_status: verifyStatus,
       });
+      console.info("[agencycrm.config.tilled] Tilled verification passed", {
+        locationId: payload.locationId,
+        verifyStatus,
+      });
     }
 
     try {
+      console.info("[agencycrm.config.tilled] attempting provider connect sync", {
+        locationId: payload.locationId,
+        mode: payload.mode,
+      });
       const accessToken = await getFreshLocationAccessToken(payload.locationId);
       await connectProviderConfig({
         locationId: payload.locationId,
@@ -80,9 +124,16 @@ export async function POST(request: Request) {
         publishableKey: payload.tilled_publishable_key || "tilled_publishable_placeholder",
         accessToken,
       });
+      console.info("[agencycrm.config.tilled] provider connect sync passed", {
+        locationId: payload.locationId,
+      });
     } catch (error) {
+      console.warn("[agencycrm.config.tilled] provider connect sync failed", {
+        locationId: payload.locationId,
+        error,
+      });
       return ok({
-        message: `Config saved, but GHL connect sync was skipped: ${
+        message: `Config saved, but provider connect sync was skipped: ${
           error instanceof Error ? error.message : "unknown error"
         }`,
         verify_status: verifyStatus,
@@ -90,12 +141,19 @@ export async function POST(request: Request) {
       });
     }
 
+    console.info("[agencycrm.config.tilled] request completed successfully", {
+      locationId: payload.locationId,
+      verifyStatus,
+      providerApiKey: saved.provider_api_key,
+    });
+
     return ok({
-      message: "Config saved and synced to GHL.",
+      message: "Config saved and synced.",
       verify_status: verifyStatus,
       provider_api_key: saved.provider_api_key,
     });
   } catch (error) {
+    console.error("[agencycrm.config.tilled] request failed", { error });
     return fail(error, 400);
   }
 }

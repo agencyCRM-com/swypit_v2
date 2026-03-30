@@ -55,7 +55,16 @@ async function tilledRequest<T>({
   method = "GET",
   body,
 }: TilledRequestOptions): Promise<T> {
-  const response = await fetch(`${stripTrailingSlash(env.TILLED_BASE_URL)}${path}`, {
+  const url = `${stripTrailingSlash(env.TILLED_BASE_URL)}${path}`;
+  console.info("[tilled.request] sending request", {
+    method,
+    url,
+    merchantAccountId: config.merchant_account_id,
+    mode: config.mode,
+    hasBody: Boolean(body),
+  });
+
+  const response = await fetch(url, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -65,8 +74,21 @@ async function tilledRequest<T>({
     body: body ? JSON.stringify(body) : undefined,
   });
 
+  console.info("[tilled.request] response received", {
+    method,
+    url,
+    status: response.status,
+    ok: response.ok,
+  });
+
   if (!response.ok) {
     const errorBody = await parseJsonResponse(response);
+    console.error("[tilled.request] request failed", {
+      method,
+      url,
+      status: response.status,
+      errorBody,
+    });
     throw new Error(`Tilled request failed (${response.status}): ${JSON.stringify(errorBody)}`);
   }
 

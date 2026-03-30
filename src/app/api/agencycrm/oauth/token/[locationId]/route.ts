@@ -1,5 +1,5 @@
 import { fail, ok } from "@/lib/api";
-import { getFreshLocationAccessToken } from "@/lib/ghl";
+import { getFreshLocationAccessToken } from "@/lib/agencycrm";
 import { getLocationTokens } from "@/lib/repositories/locations";
 
 export async function GET(_: Request, context: { params: Promise<{ locationId: string }> }) {

@@ -18,7 +18,7 @@ export default async function CheckoutPage({
 
   return (
     <CheckoutClient
-      initialEmbedded={params.embedded === "ghl"}
+      initialEmbedded={params.embedded === "agencycrm"}
       initialPaymentProps={{
         amount: Number(params.amount ?? "0"),
         currency: params.currency ?? "USD",

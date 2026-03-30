@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { env } from "@/lib/env";
 import { getLocationTokens, getTilledConfig, upsertLocationTokens } from "@/lib/repositories/locations";
 
-type GhlTokenResponse = {
+type OAuthTokenResponse = {
   access_token: string;
   refresh_token: string;
   expires_in: number;
@@ -11,7 +11,7 @@ type GhlTokenResponse = {
   companyId?: string;
 };
 
-type GhlFetchOptions = {
+type MarketplaceFetchOptions = {
   path: string;
   method?: "GET" | "POST" | "PUT";
   accessToken: string;
@@ -37,7 +37,13 @@ async function parseJsonResponse(response: Response) {
   }
 }
 
-async function ghlFetch<T>({ path, method = "GET", accessToken, body, marketplace }: GhlFetchOptions): Promise<T> {
+async function marketplaceFetch<T>({
+  path,
+  method = "GET",
+  accessToken,
+  body,
+  marketplace,
+}: MarketplaceFetchOptions): Promise<T> {
   const baseUrl = marketplace ? env.GHL_MARKETPLACE_BASE_URL : env.GHL_BASE_URL;
   const response = await fetch(`${stripTrailingSlash(baseUrl)}${path}`, {
     method,
@@ -51,13 +57,13 @@ async function ghlFetch<T>({ path, method = "GET", accessToken, body, marketplac
 
   if (!response.ok) {
     const errorBody = await parseJsonResponse(response);
-    throw new Error(`GHL request failed (${response.status}): ${JSON.stringify(errorBody)}`);
+    throw new Error(`Agency CRM request failed (${response.status}): ${JSON.stringify(errorBody)}`);
   }
 
   return (await parseJsonResponse(response)) as T;
 }
 
-export async function exchangeCodeForTokens(code: string): Promise<GhlTokenResponse> {
+export async function exchangeCodeForTokens(code: string): Promise<OAuthTokenResponse> {
   const body = new URLSearchParams({
     client_id: env.GHL_CLIENT_ID,
     client_secret: env.GHL_CLIENT_SECRET,
@@ -76,13 +82,13 @@ export async function exchangeCodeForTokens(code: string): Promise<GhlTokenRespo
 
   if (!response.ok) {
     const errorBody = await parseJsonResponse(response);
-    throw new Error(`GHL OAuth exchange failed (${response.status}): ${JSON.stringify(errorBody)}`);
+    throw new Error(`Agency CRM OAuth exchange failed (${response.status}): ${JSON.stringify(errorBody)}`);
   }
 
-  return (await response.json()) as GhlTokenResponse;
+  return (await response.json()) as OAuthTokenResponse;
 }
 
-export async function refreshAccessToken(refreshToken: string): Promise<GhlTokenResponse> {
+export async function refreshAccessToken(refreshToken: string): Promise<OAuthTokenResponse> {
   const body = new URLSearchParams({
     client_id: env.GHL_CLIENT_ID,
     client_secret: env.GHL_CLIENT_SECRET,
@@ -100,16 +106,16 @@ export async function refreshAccessToken(refreshToken: string): Promise<GhlToken
 
   if (!response.ok) {
     const errorBody = await parseJsonResponse(response);
-    throw new Error(`GHL token refresh failed (${response.status}): ${JSON.stringify(errorBody)}`);
+    throw new Error(`Agency CRM token refresh failed (${response.status}): ${JSON.stringify(errorBody)}`);
   }
 
-  return (await response.json()) as GhlTokenResponse;
+  return (await response.json()) as OAuthTokenResponse;
 }
 
 export async function getFreshLocationAccessToken(locationId: string) {
   const existing = await getLocationTokens(locationId);
   if (!existing) {
-    throw new Error(`No stored GHL tokens for location ${locationId}.`);
+    throw new Error(`No stored marketplace tokens for location ${locationId}.`);
   }
 
   if (new Date(existing.expires_at).getTime() > Date.now() + 60_000) {
@@ -130,22 +136,22 @@ export async function getFreshLocationAccessToken(locationId: string) {
 }
 
 export function createProviderApiKey() {
-  return `ghlprov_${randomUUID().replaceAll("-", "")}`;
+  return `agencycrmprov_${randomUUID().replaceAll("-", "")}`;
 }
 
 export async function createProviderIntegration(locationId: string, accessToken: string) {
-  return ghlFetch({
+  return marketplaceFetch({
     path: "/payments/custom-provider/provider",
     method: "POST",
     accessToken,
     marketplace: true,
     body: {
       name: env.GHL_APP_NAME,
-      description: "Custom Tilled payment gateway for GoHighLevel.",
+      description: "Custom Tilled payment gateway for Agency CRM.",
       imageUrl: buildAppUrl("/icon.png"),
       locationId,
-      queryUrl: buildAppUrl("/api/ghl/query"),
-      paymentsUrl: buildAppUrl("/checkout?embedded=ghl"),
+      queryUrl: buildAppUrl("/api/agencycrm/query"),
+      paymentsUrl: buildAppUrl("/checkout?embedded=agencycrm"),
     },
   });
 }
@@ -163,7 +169,7 @@ export async function connectProviderConfig({
   publishableKey: string;
   accessToken: string;
 }) {
-  return ghlFetch({
+  return marketplaceFetch({
     path: "/payments/custom-provider/connect",
     method: "POST",
     accessToken,
@@ -192,7 +198,7 @@ export async function notifyPaymentCaptured({
 }) {
   const accessToken = await getFreshLocationAccessToken(locationId);
 
-  return ghlFetch({
+  return marketplaceFetch({
     path: "/payments/custom-provider/webhook",
     method: "POST",
     accessToken,

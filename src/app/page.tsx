@@ -11,20 +11,20 @@ export default function HomePage() {
   return (
     <main style={{ padding: "24px" }}>
       <section style={cardStyle}>
-        <h1 style={{ marginTop: 0 }}>Swypit GHL Custom Payment Provider</h1>
+        <h1 style={{ marginTop: 0 }}>Swypit Agency CRM Custom Payment Provider</h1>
         <p>
           This practice app hosts the OAuth, embedded configuration, checkout, query, charge, refund,
-          and webhook endpoints needed for a GoHighLevel custom payment provider backed by Tilled.
+          and webhook endpoints needed for an Agency CRM custom payment provider backed by Tilled.
         </p>
         <ul>
           <li>
-            Embedded config page: <code>/ghl/config/tilled?locationId=...</code>
+            Embedded config page: <code>/agencycrm/config/tilled?locationId=...</code>
           </li>
           <li>
-            OAuth callback: <code>/api/ghl/oauth/callback</code>
+            OAuth callback: <code>/api/agencycrm/oauth/callback</code>
           </li>
           <li>
-            GHL query URL: <code>/api/ghl/query</code>
+            Agency CRM query URL: <code>/api/agencycrm/query</code>
           </li>
           <li>
             Standalone checkout: <code>/checkout?locationId=...&amp;order=...&amp;contact=...</code>

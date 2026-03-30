@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const ghlOauthInstallSchema = z.object({
+export const agencyCrmOauthInstallSchema = z.object({
   locationId: z.string().min(1),
 });
 
@@ -48,7 +48,7 @@ export const verifyRequestSchema = z.object({
   action: z.literal("verify").optional(),
 });
 
-export const ghlQuerySchema = z.object({
+export const agencyCrmQuerySchema = z.object({
   type: z.string().optional(),
   action: z.string().optional(),
   locationId: z.string().optional(),

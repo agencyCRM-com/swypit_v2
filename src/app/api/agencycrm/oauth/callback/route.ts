@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createProviderIntegration, exchangeCodeForTokens } from "@/lib/ghl";
+import { createProviderIntegration, exchangeCodeForTokens } from "@/lib/agencycrm";
 import { env } from "@/lib/env";
 import { upsertLocationTokens } from "@/lib/repositories/locations";
 
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
       tokens.locationId ?? searchParams.get("locationId") ?? searchParams.get("location_id");
 
     if (!locationId) {
-      throw new Error("GHL OAuth response did not include a locationId.");
+      throw new Error("OAuth response did not include a locationId.");
     }
 
     await upsertLocationTokens({
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     await createProviderIntegration(locationId, tokens.access_token);
 
     return NextResponse.redirect(
-      `${env.NEXT_PUBLIC_APP_URL}/ghl/config/tilled?locationId=${encodeURIComponent(locationId)}&installed=1`,
+      `${env.NEXT_PUBLIC_APP_URL}/agencycrm/config/tilled?locationId=${encodeURIComponent(locationId)}&installed=1`,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "OAuth callback failed.";

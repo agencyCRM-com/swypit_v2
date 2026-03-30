@@ -66,7 +66,7 @@ export function CheckoutClient({
         setPaymentProps({
           amount: event.data.amount,
           currency: event.data.currency,
-          description: "GHL payment",
+          description: "Agency CRM payment",
           orderId: event.data.orderId,
           locationId: event.data.locationId,
           customerId: event.data.contact?.id ?? "",
@@ -156,7 +156,7 @@ export function CheckoutClient({
           boxShadow: "0 12px 30px rgba(15, 23, 42, 0.08)",
         }}
       >
-        <h1 style={{ marginTop: 0 }}>{initialEmbedded ? "Embedded GHL Checkout" : "Standalone Checkout"}</h1>
+        <h1 style={{ marginTop: 0 }}>{initialEmbedded ? "Embedded Agency CRM Checkout" : "Standalone Checkout"}</h1>
         <p>
           This minimal practice page expects a saved Tilled payment method id or a client-generated token
           that your frontend can exchange for a Tilled payment method.

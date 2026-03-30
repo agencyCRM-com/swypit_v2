@@ -1,4 +1,4 @@
-import { TilledConfigForm } from "@/app/ghl/config/tilled/TilledConfigForm";
+import { TilledConfigForm } from "@/app/agencycrm/config/tilled/TilledConfigForm";
 
 export default async function TilledConfigPage({
   searchParams,

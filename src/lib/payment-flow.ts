@@ -1,4 +1,4 @@
-import { notifyPaymentCaptured } from "@/lib/ghl";
+import { notifyPaymentCaptured } from "@/lib/agencycrm";
 import {
   getTilledConfig,
   getTilledConfigByProviderApiKey,
@@ -13,7 +13,7 @@ import {
 import { createPaymentIntent, createRefund, resolvePaymentMethodId } from "@/lib/tilled";
 import {
   chargeRequestSchema,
-  ghlQuerySchema,
+  agencyCrmQuerySchema,
   refundRequestSchema,
   verifyRequestSchema,
   type ChargeRequest,
@@ -119,7 +119,7 @@ export async function handleRefund(input: unknown) {
     (payload.orderId ? await getOrderPaymentByOrderId(payload.orderId) : null);
 
   if (!payment || !payment.tilled_charge_id) {
-    throw new Error("No captured Tilled charge found for the requested GHL transaction.");
+    throw new Error("No captured Tilled charge found for the requested marketplace transaction.");
   }
 
   const refund = await createRefund({
@@ -146,7 +146,7 @@ export async function handleRefund(input: unknown) {
   };
 }
 
-function mapGhlChargeQuery(payload: {
+function mapAgencyCrmChargeQuery(payload: {
   locationId?: string;
   transactionId?: string;
   amount?: number;
@@ -156,7 +156,7 @@ function mapGhlChargeQuery(payload: {
   paymentMethodId?: string;
 }): ChargeRequest {
   if (!payload.locationId || !payload.amount || !payload.currency || !payload.contactId || !payload.paymentMethodId) {
-    throw new Error("Missing required GHL charge_payment fields.");
+    throw new Error("Missing required Agency CRM charge_payment fields.");
   }
 
   return chargeRequestSchema.parse({
@@ -166,7 +166,7 @@ function mapGhlChargeQuery(payload: {
     action: "capture",
     amount: payload.amount,
     currency: payload.currency,
-    description: payload.chargeDescription ?? "GHL saved payment method charge",
+    description: payload.chargeDescription ?? "Agency CRM saved payment method charge",
     customerId: payload.contactId,
     paymentMethod: {
       id: payload.paymentMethodId,
@@ -175,8 +175,8 @@ function mapGhlChargeQuery(payload: {
   });
 }
 
-export async function handleGhlQuery(input: unknown) {
-  const payload = ghlQuerySchema.parse(input);
+export async function handleAgencyCrmQuery(input: unknown) {
+  const payload = agencyCrmQuerySchema.parse(input);
   const config = await resolveConfigFromLocationOrApiKey(payload.locationId, payload.apiKey);
 
   if (!config) {
@@ -202,8 +202,8 @@ export async function handleGhlQuery(input: unknown) {
     case "list_payment_methods":
       return [];
     case "charge_payment":
-      return handleCharge(mapGhlChargeQuery({ ...payload, locationId: config.location_id }));
+      return handleCharge(mapAgencyCrmChargeQuery({ ...payload, locationId: config.location_id }));
     default:
-      throw new Error(`Unsupported GHL query type: ${requestType ?? "unknown"}`);
+      throw new Error(`Unsupported Agency CRM query type: ${requestType ?? "unknown"}`);
   }
 }

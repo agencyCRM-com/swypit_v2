@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "Swypit GHL Provider",
-  description: "GoHighLevel custom payment provider powered by Tilled.",
+  title: "Swypit Agency CRM Provider",
+  description: "Agency CRM custom payment provider powered by Tilled.",
 };
 
 const shellStyle = {

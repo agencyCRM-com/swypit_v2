@@ -68,8 +68,8 @@ async function tilledRequest<T>({
     method,
     headers: {
       "Content-Type": "application/json",
-      "tilled-account": config.merchant_account_id,
-      "tilled-api-key": getSecretKey(config),
+      "payments-account": config.merchant_account_id,
+      "payments-api-key": getSecretKey(config),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -112,7 +112,7 @@ export async function verifyTilledConnection(locationId: string) {
   const config = await getResolvedTilledConfig(locationId);
   return tilledRequest({
     config,
-    path: `/v1/accounts/${config.merchant_account_id}`,
+    path: "/v1/accounts/",
   });
 }
 

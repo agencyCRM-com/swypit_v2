@@ -37,6 +37,21 @@ async function parseJsonResponse(response: Response) {
   }
 }
 
+function hasMissingLocationIdError(errorBody: unknown) {
+  if (!errorBody || typeof errorBody !== "object") {
+    return false;
+  }
+
+  const message = (errorBody as { message?: unknown }).message;
+  if (!Array.isArray(message)) {
+    return false;
+  }
+
+  return message.some(
+    (item) => item === "locationId should not be empty" || item === "locationId must be a string",
+  );
+}
+
 async function marketplaceFetch<T>({
   path,
   method = "GET",
@@ -44,19 +59,79 @@ async function marketplaceFetch<T>({
   body,
   marketplace,
 }: MarketplaceFetchOptions): Promise<T> {
-  const baseUrl = marketplace ? env.GHL_MARKETPLACE_BASE_URL : env.GHL_BASE_URL;
-  const response = await fetch(`${stripTrailingSlash(baseUrl)}${path}`, {
+  const requestBody = body ? JSON.stringify(body) : undefined;
+  const primaryBaseUrl = marketplace ? env.GHL_MARKETPLACE_BASE_URL : env.GHL_BASE_URL;
+  const response = await fetch(`${stripTrailingSlash(primaryBaseUrl)}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
       Version: "2021-07-28",
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: requestBody,
   });
 
   if (!response.ok) {
     const errorBody = await parseJsonResponse(response);
+
+    if (
+      marketplace &&
+      path.startsWith("/payments/custom-provider/") &&
+      primaryBaseUrl !== env.GHL_BASE_URL &&
+      response.status === 422 &&
+      hasMissingLocationIdError(errorBody)
+    ) {
+      const fallbackBaseUrl = env.GHL_BASE_URL;
+      console.warn("[agencycrm.request] retrying custom provider request on public API host", {
+        path,
+        method,
+        primaryBaseUrl,
+        fallbackBaseUrl,
+        body,
+        errorBody,
+      });
+
+      const fallbackResponse = await fetch(`${stripTrailingSlash(fallbackBaseUrl)}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Version: "2021-07-28",
+        },
+        body: requestBody,
+      });
+
+      const fallbackBody = await parseJsonResponse(fallbackResponse);
+      if (fallbackResponse.ok) {
+        console.info("[agencycrm.request] custom provider request succeeded on public API host", {
+          path,
+          method,
+          fallbackBaseUrl,
+        });
+        return fallbackBody as T;
+      }
+
+      console.error("[agencycrm.request] custom provider request failed on both hosts", {
+        path,
+        method,
+        primaryBaseUrl,
+        fallbackBaseUrl,
+        primaryErrorBody: errorBody,
+        fallbackStatus: fallbackResponse.status,
+        fallbackErrorBody: fallbackBody,
+      });
+      throw new Error(
+        `Agency CRM request failed (${fallbackResponse.status}): ${JSON.stringify(fallbackBody)}`,
+      );
+    }
+
+    console.error("[agencycrm.request] request failed", {
+      path,
+      method,
+      baseUrl: primaryBaseUrl,
+      body,
+      errorBody,
+    });
     throw new Error(`Agency CRM request failed (${response.status}): ${JSON.stringify(errorBody)}`);
   }
 

@@ -27,6 +27,11 @@ function buildAppUrl(path: string) {
   return `${stripTrailingSlash(env.NEXT_PUBLIC_APP_URL)}${path}`;
 }
 
+function withLocationId(path: string, locationId: string) {
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}locationId=${encodeURIComponent(locationId)}`;
+}
+
 async function parseJsonResponse(response: Response) {
   const text = await response.text();
 
@@ -77,6 +82,7 @@ async function marketplaceFetch<T>({
     if (
       marketplace &&
       path.startsWith("/payments/custom-provider/") &&
+      
       primaryBaseUrl !== env.GHL_BASE_URL &&
       response.status === 422 &&
       hasMissingLocationIdError(errorBody)
@@ -216,7 +222,7 @@ export function createProviderApiKey() {
 
 export async function createProviderIntegration(locationId: string, accessToken: string) {
   return marketplaceFetch({
-    path: "/payments/custom-provider/provider",
+    path: withLocationId("/payments/custom-provider/provider", locationId),
     method: "POST",
     accessToken,
     marketplace: true,
@@ -224,7 +230,6 @@ export async function createProviderIntegration(locationId: string, accessToken:
       name: env.GHL_APP_NAME,
       description: "Custom Tilled payment gateway for Agency CRM.",
       imageUrl: buildAppUrl("/icon.png"),
-      locationId,
       queryUrl: buildAppUrl("/api/agencycrm/query"),
       paymentsUrl: buildAppUrl("/checkout?embedded=agencycrm"),
     },
@@ -233,27 +238,29 @@ export async function createProviderIntegration(locationId: string, accessToken:
 
 export async function connectProviderConfig({
   locationId,
-  mode,
   apiKey,
   publishableKey,
   accessToken,
 }: {
   locationId: string;
-  mode: "test" | "live";
   apiKey: string;
   publishableKey: string;
   accessToken: string;
 }) {
   return marketplaceFetch({
-    path: "/payments/custom-provider/connect",
+    path: withLocationId("/payments/custom-provider/connect", locationId),
     method: "POST",
     accessToken,
     marketplace: true,
     body: {
-      locationId,
-      mode,
-      apiKey,
-      publishableKey,
+      live: {
+        apiKey,
+        publishableKey,
+      },
+      test: {
+        apiKey,
+        publishableKey,
+      },
     },
   });
 }

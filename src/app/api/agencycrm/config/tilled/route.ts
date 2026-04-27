@@ -119,7 +119,6 @@ export async function POST(request: Request) {
       const accessToken = await getFreshLocationAccessToken(payload.locationId);
       await connectProviderConfig({
         locationId: payload.locationId,
-        mode: payload.mode,
         apiKey: saved.provider_api_key,
         publishableKey: payload.tilled_publishable_key || "tilled_publishable_placeholder",
         accessToken,

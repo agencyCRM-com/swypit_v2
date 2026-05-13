@@ -117,10 +117,11 @@ export async function POST(request: Request) {
         mode: payload.mode,
       });
       const accessToken = await getFreshLocationAccessToken(payload.locationId);
+      const effectivePublishableKey = payload.tilled_publishable_key || saved.publishable_key || "";
       await connectProviderConfig({
         locationId: payload.locationId,
         apiKey: saved.provider_api_key,
-        publishableKey: payload.tilled_publishable_key || "tilled_publishable_placeholder",
+        publishableKey: effectivePublishableKey,
         accessToken,
       });
       console.info("[agencycrm.config.tilled] provider connect sync passed", {

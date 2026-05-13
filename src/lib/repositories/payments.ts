@@ -130,3 +130,23 @@ export async function logIntegrationEvent(input: {
     throw error;
   }
 }
+
+/**
+ * Returns true if an event with the given source + external_id has already been logged.
+ * Used for webhook idempotency to prevent double-processing Tilled retries.
+ */
+export async function hasIntegrationEvent(source: string, externalId: string): Promise<boolean> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("integration_event_log")
+    .select("id")
+    .eq("source", source)
+    .eq("external_id", externalId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data !== null;
+}

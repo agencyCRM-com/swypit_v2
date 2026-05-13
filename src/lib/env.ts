@@ -3,6 +3,11 @@ import { z } from "zod";
 const envSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   NEXT_PUBLIC_APP_NAME: z.string().min(1).default("Swypit Agency CRM Provider"),
+  // Comma-separated list of allowed parent origins for embedded checkout postMessage.
+  // Defaults to GHL production domains; override in .env for sandbox/local testing.
+  NEXT_PUBLIC_GHL_ORIGIN: z
+    .string()
+    .default("https://app.gohighlevel.com,https://app.leadconnectorhq.com"),
   GHL_CLIENT_ID: z.string().min(1).default("placeholder-ghl-client-id"),
   GHL_CLIENT_SECRET: z.string().min(1).default("placeholder-ghl-client-secret"),
   GHL_APP_ID: z.string().min(1).default("placeholder-ghl-app-id"),

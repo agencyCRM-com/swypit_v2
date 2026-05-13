@@ -7,6 +7,7 @@ import { upsertLocationTokens } from "@/lib/repositories/locations";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
+  const state = searchParams.get("state");
   const queryLocationId = searchParams.get("locationId");
   const queryLocationIdAlt = searchParams.get("location_id");
   const queryKeys = Array.from(searchParams.keys());
@@ -18,6 +19,7 @@ export async function GET(request: Request) {
   try {
     console.info("[agencycrm.oauth.callback] callback received", {
       hasCode: Boolean(code),
+      hasState: Boolean(state),
       queryKeys,
       queryLocationId,
       queryLocationIdAlt,
@@ -75,7 +77,17 @@ export async function GET(request: Request) {
       appName: env.GHL_APP_NAME,
     });
 
-    await createProviderIntegration(locationId, tokens.access_token);
+    try {
+      await createProviderIntegration(locationId, tokens.access_token);
+      console.info("[agencycrm.oauth.callback] provider integration created", { locationId });
+    } catch (integrationError) {
+      // Non-fatal: provider integration may already exist on reinstall.
+      // Log and continue so the user still lands on the config page.
+      console.warn("[agencycrm.oauth.callback] provider integration call failed (non-fatal)", {
+        locationId,
+        error: integrationError,
+      });
+    }
 
     return NextResponse.redirect(
       `${env.NEXT_PUBLIC_APP_URL}/agencycrm/config/tilled?locationId=${encodeURIComponent(locationId)}&installed=1`,

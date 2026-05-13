@@ -3,6 +3,7 @@ import { getTilledConfigByMerchantAccountId } from "@/lib/repositories/locations
 import {
   getOrderPaymentByTilledChargeId,
   getOrderPaymentByTilledPaymentIntentId,
+  hasIntegrationEvent,
   logIntegrationEvent,
   upsertOrderPayment,
   upsertRefund,
@@ -39,6 +40,14 @@ export async function POST(request: Request) {
       return fail(new Error("Invalid webhook signature."), 401);
     }
 
+    // ── Idempotency: skip already-processed events ─────────────────────────────
+    if (payload.id) {
+      const alreadyProcessed = await hasIntegrationEvent("tilled", payload.id);
+      if (alreadyProcessed) {
+        return ok({ received: true, duplicate: true });
+      }
+    }
+
     const config = await getTilledConfigByMerchantAccountId(payload.account_id);
     await logIntegrationEvent({
       source: "tilled",
@@ -56,8 +65,9 @@ export async function POST(request: Request) {
         await upsertOrderPayment({
           ...existing,
           tilled_charge_id:
-            (Array.isArray(payload.data.charges) ? (payload.data.charges[0] as { id?: string })?.id : null) ??
-            existing.tilled_charge_id,
+            (Array.isArray(payload.data.charges)
+              ? (payload.data.charges[0] as { id?: string })?.id
+              : null) ?? existing.tilled_charge_id,
           status: String(payload.data.status ?? existing.status),
         });
       }

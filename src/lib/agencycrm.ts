@@ -247,6 +247,15 @@ export async function connectProviderConfig({
   publishableKey: string;
   accessToken: string;
 }) {
+  // Refuse to sync a placeholder publishable key to GHL — this would leave the provider
+  // in a broken state. The caller should skip this call when the key is not yet set.
+  if (!publishableKey || publishableKey === "tilled_publishable_placeholder") {
+    throw new Error(
+      "Cannot sync provider config: publishable key is missing or is a placeholder value. " +
+        "Set a real Tilled publishable key in the config first.",
+    );
+  }
+
   return marketplaceFetch({
     path: withLocationId("/payments/custom-provider/connect", locationId),
     method: "POST",

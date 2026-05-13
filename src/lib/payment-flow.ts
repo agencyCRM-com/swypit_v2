@@ -7,6 +7,7 @@ import {
 import {
   getOrderPaymentByOrderId,
   getOrderPaymentByTransactionId,
+  logIntegrationEvent,
   upsertOrderPayment,
   upsertRefund,
 } from "@/lib/repositories/payments";
@@ -18,6 +19,8 @@ import {
   verifyRequestSchema,
   type ChargeRequest,
 } from "@/lib/validators";
+
+// ── Config resolution ──────────────────────────────────────────────────────────
 
 async function resolveConfigFromLocationOrApiKey(locationId?: string, apiKey?: string) {
   if (locationId) {
@@ -39,6 +42,58 @@ function buildCapabilities(config: StoredTilledConfig | null) {
   };
 }
 
+// ── Notification retry ─────────────────────────────────────────────────────────
+
+const MAX_NOTIFY_ATTEMPTS = 3;
+const NOTIFY_BASE_DELAY_MS = 500;
+
+/**
+ * Attempts to notify GHL that a payment has been captured.
+ * Retries with exponential backoff. On final failure logs the event for
+ * manual recovery rather than silently swallowing the error.
+ */
+async function notifyPaymentCapturedWithRetry(params: Parameters<typeof notifyPaymentCaptured>[0]) {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < MAX_NOTIFY_ATTEMPTS; attempt++) {
+    try {
+      await notifyPaymentCaptured(params);
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_NOTIFY_ATTEMPTS - 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, NOTIFY_BASE_DELAY_MS * Math.pow(2, attempt)),
+        );
+      }
+    }
+  }
+
+  console.error("[payment-flow] notifyPaymentCaptured failed after retries", {
+    locationId: params.locationId,
+    chargeId: params.chargeId,
+    error: lastError,
+  });
+
+  // Persist a failure event so it can be replayed / investigated.
+  await logIntegrationEvent({
+    source: "notify_failed",
+    event_type: "payment.captured.notify_failed",
+    external_id: params.chargeId,
+    location_id: params.locationId,
+    payload: {
+      chargeId: params.chargeId,
+      ghlTransactionId: params.ghlTransactionId,
+      amount: params.amount,
+      error: lastError instanceof Error ? lastError.message : String(lastError),
+    },
+  }).catch(() => {
+    // Logging failure must never propagate.
+  });
+}
+
+// ── Handlers ───────────────────────────────────────────────────────────────────
+
 export async function handleVerify(input: unknown) {
   const payload = verifyRequestSchema.parse(input);
   const config = await getTilledConfig(payload.locationId);
@@ -53,11 +108,39 @@ export async function handleVerify(input: unknown) {
 
 export async function handleCharge(input: unknown) {
   const payload = chargeRequestSchema.parse(input);
+
+  // ── Idempotency: return existing successful payment rather than double-charging ──
+  const existing = await getOrderPaymentByOrderId(payload.orderId);
+  if (existing && (existing.status === "succeeded" || existing.status === "requires_capture")) {
+    console.info("[payment-flow] returning existing payment for idempotency", {
+      orderId: payload.orderId,
+      status: existing.status,
+      tilledPaymentIntentId: existing.tilled_payment_intent_id,
+    });
+    return {
+      success: true,
+      status: existing.status,
+      transactionId: existing.ghl_transaction_id ?? existing.tilled_payment_intent_id,
+      tilled_payment_id: existing.tilled_payment_intent_id,
+      chargeId: existing.tilled_charge_id,
+      message: "Payment already processed.",
+    };
+  }
+
   const paymentMethodId = await resolvePaymentMethodId({
     locationId: payload.locationId,
     paymentMethodId: payload.paymentMethod?.id,
     paymentToken: payload.paymentMethod?.token ?? payload.paymentToken,
   });
+
+  // Build metadata, omitting empty transactionId to avoid noisy empty keys.
+  const intentMetadata: Record<string, string> = {
+    orderId: payload.orderId,
+    customerId: payload.customerId,
+  };
+  if (payload.transactionId) {
+    intentMetadata.transactionId = payload.transactionId;
+  }
 
   const paymentIntent = await createPaymentIntent({
     locationId: payload.locationId,
@@ -67,13 +150,10 @@ export async function handleCharge(input: unknown) {
     paymentMethodId,
     customerId: payload.customerId,
     action: payload.action,
-    metadata: {
-      orderId: payload.orderId,
-      transactionId: payload.transactionId ?? "",
-      customerId: payload.customerId,
-    },
+    metadata: intentMetadata,
   });
 
+  // The real Tilled charge id lives on the first charge object, not on the intent.
   const chargeId = paymentIntent.charges?.[0]?.id ?? null;
   const record = await upsertOrderPayment({
     ghl_order_id: payload.orderId,
@@ -89,17 +169,13 @@ export async function handleCharge(input: unknown) {
   const config = await getTilledConfig(payload.locationId);
 
   if (paymentIntent.status === "succeeded" && chargeId && config) {
-    try {
-      await notifyPaymentCaptured({
-        locationId: payload.locationId,
-        chargeId,
-        ghlTransactionId: record.ghl_transaction_id,
-        amount: payload.amount,
-        providerApiKey: config.provider_api_key,
-      });
-    } catch {
-      // Non-blocking for the practice build.
-    }
+    await notifyPaymentCapturedWithRetry({
+      locationId: payload.locationId,
+      chargeId,
+      ghlTransactionId: record.ghl_transaction_id,
+      amount: payload.amount,
+      providerApiKey: config.provider_api_key,
+    });
   }
 
   return {
@@ -141,7 +217,8 @@ export async function handleRefund(input: unknown) {
   return {
     success: refund.status === "succeeded" || refund.status === "pending",
     status: refund.status,
-    reason: refund.status === "succeeded" ? "Refund created." : "Refund submitted and awaiting settlement.",
+    reason:
+      refund.status === "succeeded" ? "Refund created." : "Refund submitted and awaiting settlement.",
     tilled_refund_id: refund.id,
   };
 }
@@ -155,7 +232,13 @@ function mapAgencyCrmChargeQuery(payload: {
   contactId?: string;
   paymentMethodId?: string;
 }): ChargeRequest {
-  if (!payload.locationId || !payload.amount || !payload.currency || !payload.contactId || !payload.paymentMethodId) {
+  if (
+    !payload.locationId ||
+    !payload.amount ||
+    !payload.currency ||
+    !payload.contactId ||
+    !payload.paymentMethodId
+  ) {
     throw new Error("Missing required Agency CRM charge_payment fields.");
   }
 

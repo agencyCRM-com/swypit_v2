@@ -11,6 +11,8 @@ create index if not exists idx_ghl_order_payments_transaction_id
   on swypit_ghl.ghl_order_payments (ghl_transaction_id)
   where ghl_transaction_id is not null;
 
+  --
+
 -- Speed up Tilled config lookups during webhook dispatch.
 create index if not exists idx_tilled_location_configs_provider_api_key
   on swypit_ghl.tilled_location_configs (provider_api_key);

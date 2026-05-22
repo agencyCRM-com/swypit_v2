@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TilledCardForm, type TilledCardFormHandle } from "@/app/checkout/TilledCardForm";
 import {
   buildProviderReadyMessage,
-  normalizeGhlPaymentAmount,
+  normalizePaymentInitiateProps,
   parseParentMessage,
   postMessageToParent,
   isTrustedParentOrigin,
@@ -125,30 +125,31 @@ export function CheckoutClient({
       if (!message) return;
 
       if (message.type === "payment_initiate_props") {
+        const normalized = normalizePaymentInitiateProps(message);
+        if (!normalized) return;
+
         setParentOrigin(event.origin);
         setPropsTimeout(false);
-        const orderId = message.orderId ?? message.invoiceId ?? "";
-        const customerId = message.contactId ?? message.contact?.id ?? "";
         setPaymentProps({
-          amount: normalizeGhlPaymentAmount(message.amount),
-          currency: message.currency,
-          description: message.description ?? "Invoice payment",
-          orderId,
-          locationId: message.locationId,
-          customerId,
-          transactionId: message.transactionId,
+          amount: normalized.amount,
+          currency: normalized.currency,
+          description: normalized.description,
+          orderId: normalized.orderId,
+          locationId: normalized.locationId,
+          customerId: normalized.customerId,
+          transactionId: normalized.transactionId,
         });
-        setPaymentMethodId(message.paymentMethodId ?? message.paymentMethod?.id ?? "");
-        setPaymentToken(message.paymentToken ?? message.paymentMethod?.token ?? "");
+        setPaymentMethodId(normalized.paymentMethodId ?? "");
+        setPaymentToken(normalized.paymentToken ?? "");
         setHasAutoSubmitted(false);
         setHasReceivedProps(true);
 
-        if (message.publishableKey) {
+        if (normalized.publishableKey) {
           setTilledConfig((current) =>
-            current?.publishableKey === message.publishableKey
+            current?.publishableKey === normalized.publishableKey
               ? current
               : {
-                  publishableKey: message.publishableKey!,
+                  publishableKey: normalized.publishableKey!,
                   merchantAccountId: current?.merchantAccountId ?? "",
                   sandbox: current?.sandbox ?? true,
                 },
@@ -216,7 +217,9 @@ export function CheckoutClient({
     if (!initialEmbedded || !hasReceivedProps) return null;
     const missing: string[] = [];
     if (!paymentProps.locationId) missing.push("Location ID");
-    if (!paymentProps.orderId) missing.push("Order ID");
+    if (!paymentProps.orderId) {
+      missing.push("Order ID (orderId, invoiceId, or transactionId from invoice)");
+    }
     if (!paymentProps.customerId) missing.push("Customer ID");
     if (paymentProps.amount <= 0) missing.push("Amount");
     return missing.length > 0 ? missing : null;

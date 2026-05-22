@@ -20,7 +20,120 @@ export type PaymentInitiateProps = {
   paymentMethodId?: string;
   paymentToken?: string;
   paymentMethod?: { id?: string; token?: string };
+  /** GHL sometimes nests invoice/order id here for invoice payments. */
+  source?: string | { type?: string; id?: string };
 };
+
+export type NormalizedPaymentInitiate = {
+  amount: number;
+  currency: string;
+  description: string;
+  orderId: string;
+  locationId: string;
+  customerId: string;
+  transactionId?: string;
+  publishableKey?: string;
+  paymentMethodId?: string;
+  paymentToken?: string;
+};
+
+function pickString(record: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+/**
+ * Resolves the id used as ghl_order_id. Invoice flows often omit orderId and only
+ * send transactionId or a source.id — mirror payment-flow charge_payment fallback.
+ */
+export function resolveGhlOrderId(record: Record<string, unknown>): string {
+  const direct = pickString(
+    record,
+    "orderId",
+    "order_id",
+    "invoiceId",
+    "invoice_id",
+    "transactionId",
+    "transaction_id",
+  );
+  if (direct) return direct;
+
+  const source = record.source;
+  if (typeof source === "string") {
+    try {
+      const parsed = JSON.parse(source) as { id?: string };
+      if (typeof parsed.id === "string" && parsed.id.trim()) {
+        return parsed.id.trim();
+      }
+    } catch {
+      // ignore malformed source
+    }
+  }
+
+  if (typeof source === "object" && source !== null) {
+    const id = (source as { id?: unknown }).id;
+    if (typeof id === "string" && id.trim()) {
+      return id.trim();
+    }
+  }
+
+  return "";
+}
+
+export function resolveGhlCustomerId(record: Record<string, unknown>): string {
+  const direct = pickString(record, "contactId", "contact_id", "customerId", "customer_id");
+  if (direct) return direct;
+
+  const contact = record.contact;
+  if (typeof contact === "object" && contact !== null) {
+    const id = (contact as { id?: unknown }).id;
+    if (typeof id === "string" && id.trim()) {
+      return id.trim();
+    }
+  }
+
+  return "";
+}
+
+export function normalizePaymentInitiateProps(
+  message: PaymentInitiateProps,
+): NormalizedPaymentInitiate | null {
+  const raw = message as PaymentInitiateProps & Record<string, unknown>;
+  const locationId = pickString(raw, "locationId", "location_id");
+  if (!locationId) return null;
+
+  const orderId = resolveGhlOrderId(raw);
+  const customerId = resolveGhlCustomerId(raw);
+  const amount = normalizeGhlPaymentAmount(raw.amount);
+  const currency = pickString(raw, "currency") || "USD";
+
+  const paymentMethod =
+    typeof raw.paymentMethod === "object" && raw.paymentMethod !== null
+      ? (raw.paymentMethod as { id?: string; token?: string })
+      : undefined;
+
+  return {
+    amount,
+    currency,
+    description: pickString(raw, "description", "chargeDescription") || "Invoice payment",
+    orderId,
+    locationId,
+    customerId,
+    transactionId: pickString(raw, "transactionId", "transaction_id") || undefined,
+    publishableKey: pickString(raw, "publishableKey", "publishable_key") || undefined,
+    paymentMethodId:
+      pickString(raw, "paymentMethodId", "payment_method_id") ||
+      paymentMethod?.id ||
+      undefined,
+    paymentToken:
+      pickString(raw, "paymentToken", "payment_token") || paymentMethod?.token || undefined,
+  };
+}
 
 export type SetupInitiateProps = {
   type: "setup_initiate_props";

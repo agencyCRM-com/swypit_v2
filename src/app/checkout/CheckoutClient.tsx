@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TilledCardForm, type TilledCardFormHandle } from "@/app/checkout/TilledCardForm";
+import {
+  buildProviderReadyMessage,
+  normalizeGhlPaymentAmount,
+  parseParentMessage,
+  postMessageToParent,
+  isTrustedParentOrigin,
+} from "@/lib/ghl-checkout-messaging";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -22,27 +29,6 @@ type TilledConfig = {
   sandbox: boolean;
 };
 
-type ParentMessage =
-  | {
-      type: "payment_initiate_props";
-      /** GHL sends amount in minor units (cents). Normalised to major units on receipt. */
-      amount: number;
-      currency: string;
-      orderId: string;
-      locationId: string;
-      transactionId?: string;
-      description?: string;
-      contact?: { id?: string };
-      paymentMethodId?: string;
-      paymentToken?: string;
-      paymentMethod?: { id?: string; token?: string };
-    }
-  | {
-      type: "setup_initiate_props";
-      locationId: string;
-      contact?: { id?: string };
-    };
-
 type ChargeResponse = {
   error?: string;
   tilled_payment_id?: string;
@@ -51,11 +37,6 @@ type ChargeResponse = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-/** GHL sends amounts in minor units (cents). Convert to major units for display + API. */
-function centsToMajor(cents: number): number {
-  return cents / 100;
-}
 
 function formatAmount(currency: string, amount: number): string {
   return `${currency.toUpperCase()} ${amount.toFixed(2)}`;
@@ -104,6 +85,7 @@ export function CheckoutClient({
   // Tilled public config (publishable key) fetched per location.
   const [tilledConfig, setTilledConfig] = useState<TilledConfig | null>(null);
   const [cardFormReady, setCardFormReady] = useState(false);
+  const [propsTimeout, setPropsTimeout] = useState(false);
 
   const cardFormRef = useRef<TilledCardFormHandle>(null);
   // Always holds the latest submitPayment to avoid stale closures in effects.
@@ -129,46 +111,58 @@ export function CheckoutClient({
       .catch(() => setTilledConfig(null));
   }, [paymentProps.locationId]);
 
-  // ── Send ready signal + listen for parent messages (embedded only) ───────────
+  // ── Listen for parent messages (embedded only) ───────────────────────────────
 
   useEffect(() => {
     if (!initialEmbedded || typeof window === "undefined") return;
 
-    window.parent.postMessage(
-      { type: "custom_provider_ready", loaded: true, addCardOnFileSupported: false },
-      "*",
-    );
-
-    const onMessage = (event: MessageEvent<ParentMessage>) => {
-      // Reject messages from untrusted origins.
-      if (allowedOrigins.length > 0 && !allowedOrigins.includes(event.origin)) {
+    const onMessage = (event: MessageEvent) => {
+      if (!isTrustedParentOrigin(event.origin, allowedOrigins)) {
         return;
       }
 
-      if (event.data.type === "payment_initiate_props") {
+      const message = parseParentMessage(event.data);
+      if (!message) return;
+
+      if (message.type === "payment_initiate_props") {
         setParentOrigin(event.origin);
+        setPropsTimeout(false);
+        const orderId = message.orderId ?? message.invoiceId ?? "";
+        const customerId = message.contactId ?? message.contact?.id ?? "";
         setPaymentProps({
-          // Normalise cents → major units (GHL sends minor units in payment_initiate_props).
-          amount: centsToMajor(event.data.amount),
-          currency: event.data.currency,
-          description: event.data.description ?? "Invoice payment",
-          orderId: event.data.orderId,
-          locationId: event.data.locationId,
-          customerId: event.data.contact?.id ?? "",
-          transactionId: event.data.transactionId,
+          amount: normalizeGhlPaymentAmount(message.amount),
+          currency: message.currency,
+          description: message.description ?? "Invoice payment",
+          orderId,
+          locationId: message.locationId,
+          customerId,
+          transactionId: message.transactionId,
         });
-        setPaymentMethodId(event.data.paymentMethodId ?? event.data.paymentMethod?.id ?? "");
-        setPaymentToken(event.data.paymentToken ?? event.data.paymentMethod?.token ?? "");
+        setPaymentMethodId(message.paymentMethodId ?? message.paymentMethod?.id ?? "");
+        setPaymentToken(message.paymentToken ?? message.paymentMethod?.token ?? "");
         setHasAutoSubmitted(false);
         setHasReceivedProps(true);
+
+        if (message.publishableKey) {
+          setTilledConfig((current) =>
+            current?.publishableKey === message.publishableKey
+              ? current
+              : {
+                  publishableKey: message.publishableKey!,
+                  merchantAccountId: current?.merchantAccountId ?? "",
+                  sandbox: current?.sandbox ?? true,
+                },
+          );
+        }
       }
 
-      if (event.data.type === "setup_initiate_props") {
+      if (message.type === "setup_initiate_props") {
         setParentOrigin(event.origin);
+        setPropsTimeout(false);
         setPaymentProps((cur) => ({
           ...cur,
-          locationId: event.data.locationId,
-          customerId: event.data.contact?.id ?? "",
+          locationId: message.locationId,
+          customerId: message.contactId ?? message.contact?.id ?? "",
         }));
         setHasReceivedProps(true);
       }
@@ -177,6 +171,26 @@ export function CheckoutClient({
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [allowedOrigins, initialEmbedded]);
+
+  // ── Signal custom_provider_ready (stringified JSON for GHL parent parser) ───
+
+  useEffect(() => {
+    if (!initialEmbedded || typeof window === "undefined" || hasReceivedProps) return;
+
+    const signalReady = () => {
+      postMessageToParent(buildProviderReadyMessage(), "*");
+    };
+
+    signalReady();
+    const readyInterval = window.setInterval(signalReady, 2_000);
+    return () => window.clearInterval(readyInterval);
+  }, [hasReceivedProps, initialEmbedded]);
+
+  useEffect(() => {
+    if (!initialEmbedded || hasReceivedProps) return;
+    const timer = window.setTimeout(() => setPropsTimeout(true), 12_000);
+    return () => window.clearTimeout(timer);
+  }, [hasReceivedProps, initialEmbedded]);
 
   // ── Derived state ────────────────────────────────────────────────────────────
 
@@ -211,10 +225,8 @@ export function CheckoutClient({
   // ── Parent postMessage helper ────────────────────────────────────────────────
 
   function postToParent(message: Record<string, unknown>) {
-    if (typeof window === "undefined") return;
-    // Use the verified parent origin; fall back to first configured origin then *.
     const target = parentOrigin ?? allowedOrigins[0] ?? "*";
-    window.parent.postMessage(message, target);
+    postMessageToParent(message, target);
   }
 
   // ── Payment execution ────────────────────────────────────────────────────────
@@ -273,8 +285,9 @@ export function CheckoutClient({
     }
   }
 
-  // Keep ref current on every render so the auto-submit effect never has a stale closure.
-  submitPaymentRef.current = submitPayment;
+  useEffect(() => {
+    submitPaymentRef.current = submitPayment;
+  });
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -287,8 +300,10 @@ export function CheckoutClient({
     if (!initialEmbedded || hasAutoSubmitted || isSubmitting || !canSubmit) return;
     if (!paymentMethodId && !paymentToken) return;
 
-    setHasAutoSubmitted(true);
-    void submitPaymentRef.current?.();
+    queueMicrotask(() => {
+      setHasAutoSubmitted(true);
+      void submitPaymentRef.current?.();
+    });
   }, [canSubmit, hasAutoSubmitted, initialEmbedded, isSubmitting, paymentMethodId, paymentToken]);
 
   const handleCardFormReady = useCallback((ready: boolean) => {
@@ -310,7 +325,16 @@ export function CheckoutClient({
             textAlign: "center",
           }}
         >
-          <p style={{ color: "#6b7280", margin: 0 }}>Preparing payment…</p>
+          <p style={{ color: "#6b7280", margin: 0 }}>
+            {propsTimeout ? "Waiting for invoice details from HighLevel…" : "Preparing payment…"}
+          </p>
+          {propsTimeout ? (
+            <p style={{ color: "#dc2626", margin: "12px 0 0", fontSize: "14px" }}>
+              Payment details were not received. Confirm your Payments URL uses{" "}
+              <code>?embedded=agencycrm</code> and that this location has a publishable key
+              configured in the Swypit integration.
+            </p>
+          ) : null}
         </section>
       </main>
     );

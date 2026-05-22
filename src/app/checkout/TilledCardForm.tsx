@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 // ── Tilled.js SDK type surface (subset used here) ──────────────────────────────
 
@@ -103,7 +103,11 @@ export const TilledCardForm = forwardRef<TilledCardFormHandle, TilledCardFormPro
       },
     }));
 
-    const stableOnReady = useCallback(onReady, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const onReadyRef = useRef(onReady);
+
+    useEffect(() => {
+      onReadyRef.current = onReady;
+    }, [onReady]);
 
     useEffect(() => {
       let active = true;
@@ -143,9 +147,9 @@ export const TilledCardForm = forwardRef<TilledCardFormHandle, TilledCardFormPro
           await cardExpiry.inject("#tilled-field-card-expiry");
           await cardCvv.inject("#tilled-field-card-cvv");
 
-          if (active) stableOnReady(true);
+          if (active) onReadyRef.current(true);
         } catch {
-          if (active) stableOnReady(false);
+          if (active) onReadyRef.current(false);
         }
       }
 
@@ -156,9 +160,9 @@ export const TilledCardForm = forwardRef<TilledCardFormHandle, TilledCardFormPro
         tilledFormRef.current?.teardown();
         tilledFormRef.current = null;
         tilledRef.current = null;
-        stableOnReady(false);
+        onReadyRef.current(false);
       };
-    }, [publishableKey, merchantAccountId, sandbox, stableOnReady]);
+    }, [publishableKey, merchantAccountId, sandbox]);
 
     return (
       <div style={{ display: "grid", gap: "12px" }}>

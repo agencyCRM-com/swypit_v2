@@ -7,7 +7,9 @@ const envSchema = z.object({
   // Defaults to GHL production domains; override in .env for sandbox/local testing.
   NEXT_PUBLIC_GHL_ORIGIN: z
     .string()
-    .default("https://app.gohighlevel.com,https://app.leadconnectorhq.com"),
+    .default(
+      "https://app.gohighlevel.com,https://app.leadconnectorhq.com,https://app.msgsndr.com,https://api.agencycrm.com",
+    ),
   GHL_CLIENT_ID: z.string().min(1).default("placeholder-ghl-client-id"),
   GHL_CLIENT_SECRET: z.string().min(1).default("placeholder-ghl-client-secret"),
   GHL_APP_ID: z.string().min(1).default("placeholder-ghl-app-id"),

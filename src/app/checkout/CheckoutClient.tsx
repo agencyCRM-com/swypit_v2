@@ -86,6 +86,7 @@ export function CheckoutClient({
   const [tilledConfig, setTilledConfig] = useState<TilledConfig | null>(null);
   const [cardFormReady, setCardFormReady] = useState(false);
   const [propsTimeout, setPropsTimeout] = useState(false);
+  const [configLoadError, setConfigLoadError] = useState<string | null>(null);
 
   const cardFormRef = useRef<TilledCardFormHandle>(null);
   // Always holds the latest submitPayment to avoid stale closures in effects.
@@ -106,9 +107,24 @@ export function CheckoutClient({
     if (!paymentProps.locationId) return;
 
     void fetch(`/api/tilled/config?locationId=${encodeURIComponent(paymentProps.locationId)}`)
-      .then((r) => (r.ok ? (r.json() as Promise<TilledConfig>) : Promise.resolve(null)))
-      .then((data) => setTilledConfig(data))
-      .catch(() => setTilledConfig(null));
+      .then(async (r) => {
+        const body = (await r.json()) as TilledConfig & { error?: string };
+        if (!r.ok) {
+          throw new Error(body.error ?? "Unable to load payment provider config.");
+        }
+        if (!body.publishableKey || !body.merchantAccountId) {
+          throw new Error("Payment provider is missing publishable key or merchant account id.");
+        }
+        return body;
+      })
+      .then((data) => {
+        setConfigLoadError(null);
+        setTilledConfig(data);
+      })
+      .catch((err) => {
+        setTilledConfig(null);
+        setConfigLoadError(err instanceof Error ? err.message : "Config load failed.");
+      });
   }, [paymentProps.locationId]);
 
   // ── Listen for parent messages (embedded only) ───────────────────────────────
@@ -144,17 +160,7 @@ export function CheckoutClient({
         setHasAutoSubmitted(false);
         setHasReceivedProps(true);
 
-        if (normalized.publishableKey) {
-          setTilledConfig((current) =>
-            current?.publishableKey === normalized.publishableKey
-              ? current
-              : {
-                  publishableKey: normalized.publishableKey!,
-                  merchantAccountId: current?.merchantAccountId ?? "",
-                  sandbox: current?.sandbox ?? true,
-                },
-          );
-        }
+        // Do not set partial config here — wait for /api/tilled/config so merchantAccountId is present.
       }
 
       if (message.type === "setup_initiate_props") {
@@ -195,11 +201,15 @@ export function CheckoutClient({
 
   // ── Derived state ────────────────────────────────────────────────────────────
 
+  const hasTilledConfig = Boolean(
+    tilledConfig?.publishableKey && tilledConfig.merchantAccountId,
+  );
+
   /**
-   * Show Tilled hosted card fields when no saved method/token is available
-   * and the Tilled public config has been fetched successfully.
+   * Show Tilled hosted card fields only when publishable key AND merchant account id
+   * are loaded (both are required for Tilled.js field injection).
    */
-  const showCardForm = Boolean(tilledConfig?.publishableKey && !paymentMethodId && !paymentToken);
+  const showCardForm = Boolean(hasTilledConfig && !paymentMethodId && !paymentToken);
 
   const canSubmit = useMemo(() => {
     const hasSavedMethod = Boolean(paymentMethodId || paymentToken);
@@ -474,12 +484,19 @@ export function CheckoutClient({
             ) : null}
 
             {/* Loading state: config fetch in progress, no saved method, no debug fields */}
+            {configLoadError ? (
+              <p style={{ fontSize: "14px", color: "#dc2626", margin: "0 0 16px" }}>
+                {configLoadError}
+              </p>
+            ) : null}
+
             {!showCardForm &&
             !paymentMethodId &&
             !paymentToken &&
             !showDebugFields &&
             paymentProps.locationId &&
-            tilledConfig === null ? (
+            !hasTilledConfig &&
+            !configLoadError ? (
               <p style={{ fontSize: "14px", color: "#6b7280", margin: "0 0 16px" }}>
                 Loading payment form…
               </p>

@@ -1,11 +1,11 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
 
 // ── Tilled.js SDK type surface (subset used here) ──────────────────────────────
 
 type TilledFieldElement = {
-  inject: (selector: string) => Promise<void>;
+  inject: (selector: string | HTMLElement) => Promise<void>;
 };
 
 type TilledForm = {
@@ -28,7 +28,7 @@ type TilledInstance = {
 
 declare global {
   interface Window {
-    Tilled: new (
+    Tilled?: new (
       publishableKey: string,
       accountId: string,
       options: { sandbox: boolean },
@@ -61,6 +61,8 @@ const hostedFieldStyle: React.CSSProperties = {
   border: "1px solid #d1d5db",
   padding: "0 12px",
   boxSizing: "border-box",
+  background: "#fff",
+  overflow: "hidden",
 };
 
 const labelStyle: React.CSSProperties = {
@@ -78,6 +80,41 @@ const inputStyle: React.CSSProperties = {
   fontSize: "14px",
 };
 
+function waitForTilledSdk(): Promise<void> {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Tilled.js can only load in the browser."));
+  }
+
+  if (window.Tilled) {
+    return Promise.resolve();
+  }
+
+  const existing = document.getElementById("tilled-js-sdk") as HTMLScriptElement | null;
+  if (existing) {
+    return new Promise((resolve, reject) => {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("Failed to load Tilled.js SDK.")),
+        { once: true },
+      );
+      window.setTimeout(() => {
+        if (window.Tilled) resolve();
+      }, 50);
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.id = "tilled-js-sdk";
+    script.src = TILLED_SDK_URL;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Tilled.js SDK."));
+    document.head.appendChild(script);
+  });
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export const TilledCardForm = forwardRef<TilledCardFormHandle, TilledCardFormProps>(
@@ -85,11 +122,19 @@ export const TilledCardForm = forwardRef<TilledCardFormHandle, TilledCardFormPro
     const tilledRef = useRef<TilledInstance | null>(null);
     const tilledFormRef = useRef<TilledForm | null>(null);
     const [cardholderName, setCardholderName] = useState("");
+    const [initError, setInitError] = useState<string | null>(null);
+    const fieldIdPrefix = useId().replace(/:/g, "");
+
+    const cardNumberRef = useRef<HTMLDivElement>(null);
+    const cardExpiryRef = useRef<HTMLDivElement>(null);
+    const cardCvvRef = useRef<HTMLDivElement>(null);
 
     useImperativeHandle(ref, () => ({
       async tokenize() {
         if (!tilledRef.current) {
-          throw new Error("Payment form is not ready. Please wait and try again.");
+          throw new Error(
+            initError ?? "Payment form is not ready. Please wait and try again.",
+          );
         }
         const name = cardholderName.trim() || "Card Holder";
         const result = await tilledRef.current.createPaymentMethod({
@@ -110,24 +155,37 @@ export const TilledCardForm = forwardRef<TilledCardFormHandle, TilledCardFormPro
     }, [onReady]);
 
     useEffect(() => {
-      let active = true;
-
-      async function loadSdk(): Promise<void> {
-        if (document.getElementById("tilled-js-sdk")) return;
-        return new Promise<void>((resolve, reject) => {
-          const script = document.createElement("script");
-          script.id = "tilled-js-sdk";
-          script.src = TILLED_SDK_URL;
-          script.onload = () => resolve();
-          script.onerror = () => reject(new Error("Failed to load Tilled.js SDK."));
-          document.head.appendChild(script);
-        });
+      if (!publishableKey || !merchantAccountId) {
+        onReadyRef.current(false);
+        return;
       }
 
+      let active = true;
+
       async function init() {
+        setInitError(null);
+        onReadyRef.current(false);
+
         try {
-          await loadSdk();
-          if (!active || !window.Tilled) return;
+          await waitForTilledSdk();
+          if (!active || !window.Tilled) {
+            throw new Error("Tilled.js SDK did not initialize.");
+          }
+
+          const numberEl = cardNumberRef.current;
+          const expiryEl = cardExpiryRef.current;
+          const cvvEl = cardCvvRef.current;
+          if (!numberEl || !expiryEl || !cvvEl) {
+            throw new Error("Card field containers are not mounted.");
+          }
+
+          tilledFormRef.current?.teardown();
+          tilledFormRef.current = null;
+          tilledRef.current = null;
+
+          numberEl.innerHTML = "";
+          expiryEl.innerHTML = "";
+          cvvEl.innerHTML = "";
 
           const tilled = new window.Tilled(publishableKey, merchantAccountId, { sandbox });
           tilledRef.current = tilled;
@@ -143,13 +201,18 @@ export const TilledCardForm = forwardRef<TilledCardFormHandle, TilledCardFormPro
           const cardExpiry = form.createField("cardExpiry");
           const cardCvv = form.createField("cardCvv");
 
-          await cardNumber.inject("#tilled-field-card-number");
-          await cardExpiry.inject("#tilled-field-card-expiry");
-          await cardCvv.inject("#tilled-field-card-cvv");
+          await cardNumber.inject(numberEl);
+          await cardExpiry.inject(expiryEl);
+          await cardCvv.inject(cvvEl);
 
           if (active) onReadyRef.current(true);
-        } catch {
-          if (active) onReadyRef.current(false);
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Failed to load secure card fields.";
+          if (active) {
+            setInitError(message);
+            onReadyRef.current(false);
+          }
         }
       }
 
@@ -167,8 +230,11 @@ export const TilledCardForm = forwardRef<TilledCardFormHandle, TilledCardFormPro
     return (
       <div style={{ display: "grid", gap: "12px" }}>
         <div style={{ display: "grid", gap: "6px" }}>
-          <label style={labelStyle}>Cardholder Name</label>
+          <label style={labelStyle} htmlFor={`${fieldIdPrefix}-cardholder`}>
+            Cardholder Name
+          </label>
           <input
+            id={`${fieldIdPrefix}-cardholder`}
             style={inputStyle}
             placeholder="Full name on card"
             value={cardholderName}
@@ -179,19 +245,23 @@ export const TilledCardForm = forwardRef<TilledCardFormHandle, TilledCardFormPro
 
         <div style={{ display: "grid", gap: "6px" }}>
           <label style={labelStyle}>Card Number</label>
-          <div id="tilled-field-card-number" style={hostedFieldStyle} />
+          <div ref={cardNumberRef} style={hostedFieldStyle} />
         </div>
 
         <div style={{ display: "grid", gap: "12px", gridTemplateColumns: "1fr 1fr" }}>
           <div style={{ display: "grid", gap: "6px" }}>
             <label style={labelStyle}>Expiry</label>
-            <div id="tilled-field-card-expiry" style={hostedFieldStyle} />
+            <div ref={cardExpiryRef} style={hostedFieldStyle} />
           </div>
           <div style={{ display: "grid", gap: "6px" }}>
             <label style={labelStyle}>CVV</label>
-            <div id="tilled-field-card-cvv" style={hostedFieldStyle} />
+            <div ref={cardCvvRef} style={hostedFieldStyle} />
           </div>
         </div>
+
+        {initError ? (
+          <p style={{ margin: 0, fontSize: "14px", color: "#dc2626" }}>{initError}</p>
+        ) : null}
       </div>
     );
   },

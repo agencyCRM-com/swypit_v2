@@ -25,7 +25,7 @@ export default async function CheckoutPage({
       initialEmbedded={params.embedded === "agencycrm"}
       initialPaymentProps={{
         amount: Number(params.amount ?? "0"),
-        currency: params.currency ?? "USD",
+        currency: params.currency ?? "CAD",
         description: params.description ?? "Swypit checkout",
         orderId: params.order ?? "",
         locationId: params.locationId ?? "",

@@ -110,7 +110,7 @@ export function normalizePaymentInitiateProps(
   const orderId = resolveGhlOrderId(raw);
   const customerId = resolveGhlCustomerId(raw);
   const amount = normalizeGhlPaymentAmount(raw.amount);
-  const currency = pickString(raw, "currency") || "USD";
+  const currency = pickString(raw, "currency") || "CAD";
 
   const paymentMethod =
     typeof raw.paymentMethod === "object" && raw.paymentMethod !== null
